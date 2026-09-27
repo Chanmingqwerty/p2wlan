@@ -1292,6 +1292,16 @@ mod hard_hard_tests {
                 .await
         );
         assert!(handoff.finalize().await);
+        // Finalizing the new affinity detaches its superseded predecessor
+        // before session registration cancels the old session. Late cleanup
+        // must therefore tolerate the old socket already being gone.
+        assert!(!old.cancellation.is_cancelled());
+        assert_eq!(
+            udp.hard_hard_socket_token(old.fresh_socket.socket_index)
+                .await,
+            None,
+            "the finalized handoff must retire the old socket before late session cleanup"
+        );
         assert!(peers.hard_hard_register_session(replacement.clone()).await);
         assert!(old.cancellation.is_cancelled());
         assert_eq!(
@@ -1314,7 +1324,12 @@ mod hard_hard_tests {
             )
             .await
         );
-        assert_eq!(udp.dynamic_socket_count().await, 2);
+        assert!(
+            udp.hard_hard_socket_identity_is_current(&replacement.fresh_socket)
+                .await,
+            "the replacement must own its exact socket and affinity before old cleanup"
+        );
+        assert!(!replacement.cancellation.is_cancelled());
 
         let _ = peers
             .hard_hard_retire_session(&old.peer_id, &old.session_id, &old.session_token)
@@ -1340,6 +1355,12 @@ mod hard_hard_tests {
                 .await
         );
         assert_eq!(udp.dynamic_socket_count().await, 1);
+        assert!(
+            udp.hard_hard_socket_identity_is_current(&replacement.fresh_socket)
+                .await,
+            "old token and socket cleanup must preserve the replacement's exact identity and affinity"
+        );
+        assert!(!replacement.cancellation.is_cancelled());
         assert!(peers
             .hard_hard_session_by_token(&replacement.peer_id, &replacement.session_token)
             .await
